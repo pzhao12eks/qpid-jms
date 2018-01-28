@@ -25,6 +25,8 @@ import java.util.ArrayList;
 import java.util.ListIterator;
 import java.util.concurrent.ScheduledFuture;
 
+import javax.jms.JMSException;
+
 import org.apache.qpid.jms.JmsDestination;
 import org.apache.qpid.jms.JmsOperationTimedOutException;
 import org.apache.qpid.jms.exceptions.JmsExceptionSupport;
@@ -247,14 +249,18 @@ public class AmqpConsumer extends AmqpAbstractResource<JmsConsumerInfo, Receiver
     }
 
     /**
-     * Called to acknowledge a given delivery.
+     * Called to acknowledge a given delivery.  Depending on the Ack Mode that
+     * the consumer was created with this method can acknowledge more than just
+     * the target delivery.
      *
      * @param envelope
      *        the delivery that is to be acknowledged.
      * @param ackType
-     *        the type of acknowledgement to perform.
+     *        the type of acknowledgment to perform.
+     *
+     * @throws JMSException if an error occurs accessing the Message properties.
      */
-    public void acknowledge(JmsInboundMessageDispatch envelope, ACK_TYPE ackType) {
+    public void acknowledge(JmsInboundMessageDispatch envelope, ACK_TYPE ackType) throws JMSException {
         Delivery delivery = null;
 
         if (envelope.getProviderHint() instanceof Delivery) {
@@ -340,7 +346,7 @@ public class AmqpConsumer extends AmqpAbstractResource<JmsConsumerInfo, Receiver
             int prefetchedMessageCount = getResourceInfo().getPrefetchedMessageCount();
 
             int potentialPrefetch = currentCredit + prefetchedMessageCount;
-            if (potentialPrefetch <= prefetchSize * 0.7) {
+            if(potentialPrefetch <= prefetchSize * 0.7) {
                 int additionalCredit = prefetchSize - currentCredit - prefetchedMessageCount;
 
                 LOG.trace("Consumer {} granting additional credit: {}", getConsumerId(), additionalCredit);
@@ -495,8 +501,6 @@ public class AmqpConsumer extends AmqpAbstractResource<JmsConsumerInfo, Receiver
             //        a bytes messages as a fall back.
             settleDelivery(incoming, MODIFIED_FAILED_UNDELIVERABLE);
             return false;
-        } finally {
-            incomingBuffer.clear();
         }
 
         try {
@@ -600,7 +604,11 @@ public class AmqpConsumer extends AmqpAbstractResource<JmsConsumerInfo, Receiver
             }
         }
 
-        return incomingBuffer;
+        try {
+            return incomingBuffer.duplicate();
+        } finally {
+            incomingBuffer.clear();
+        }
     }
 
     public void preCommit() {

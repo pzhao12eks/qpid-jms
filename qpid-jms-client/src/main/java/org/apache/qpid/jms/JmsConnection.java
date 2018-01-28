@@ -18,6 +18,7 @@ package org.apache.qpid.jms;
 
 import java.io.IOException;
 import java.net.URI;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,7 +39,6 @@ import javax.jms.IllegalStateException;
 import javax.jms.InvalidClientIDException;
 import javax.jms.InvalidDestinationException;
 import javax.jms.JMSException;
-import javax.jms.JMSRuntimeException;
 import javax.jms.Queue;
 import javax.jms.QueueConnection;
 import javax.jms.QueueSession;
@@ -476,12 +476,8 @@ public class JmsConnection implements AutoCloseable, Connection, TopicConnection
 
         if (transacted) {
             result = Session.SESSION_TRANSACTED;
-        } else {
-            try {
-                JmsSession.validateSessionMode(acknowledgeMode);
-            } catch (JMSRuntimeException jmsre) {
-                throw new JMSException("acknowledgeMode " + acknowledgeMode + " cannot be used for an non-transacted Session");
-            }
+        } else if (acknowledgeMode < Session.SESSION_TRANSACTED || acknowledgeMode > Session.DUPS_OK_ACKNOWLEDGE){
+            throw new JMSException("acknowledgeMode " + acknowledgeMode + " cannot be used for an non-transacted Session");
         }
 
         return result;
@@ -1372,6 +1368,26 @@ public class JmsConnection implements AutoCloseable, Connection, TopicConnection
         // Report this to any registered exception listener, let the receiver
         // decide if it should be fatal.
         onAsyncException(cause);
+    }
+
+    @Override
+    public void onRemoteDiscovery(final List<URI> remotes) {
+        for (URI remote : remotes) {
+            LOG.trace("Discovered new remote at: {}", remote);
+        }
+
+        // Give listeners a chance to know what we've discovered.
+        if (!connectionListeners.isEmpty()) {
+            for (final JmsConnectionListener listener : connectionListeners) {
+                executor.submit(new Runnable() {
+
+                    @Override
+                    public void run() {
+                        listener.onRemoteDiscovery(remotes);
+                    }
+                });
+            }
+        }
     }
 
     /**
